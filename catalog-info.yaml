@@ -1,0 +1,165 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: host-template
+  title: EKS Host Template
+  description: A template that creates an EKS cluster in the organization infra's.
+  tags:
+    - host
+    - terraform
+    - eks
+spec:
+  owner: group:backstage-poc
+  type: infrastructure
+
+  parameters:
+    - title: Cluster details
+      required:
+        - action
+        - account
+        - clusterName
+        - clusterVersion
+      properties:
+        action:
+          title: Merge action
+          type: string
+          default: "create"
+          enum:
+            - "create"
+            - "update"
+            - "delete"
+        account:
+          title: Account
+          type: string
+          description: Account where we are going to deploy the cluster
+          default: test1-use1-dev
+          enum:
+            - test1-use1-dev,1233,us-east-1
+            - w-euc1-dev,444562,eu-central-1
+          enumNames:
+            - test1-use1-dev
+            - w-euc1-dev
+        clusterName:
+          title: Cluster name
+          type: string
+          description: The name of the cluster, use lowercase letters, numbers and hyphens only
+          maxLength: 50
+          pattern: "^([a-z][a-z0-9]*)(-[a-z0-9]+)*$"
+        clusterVersion:
+          title: Cluster version
+          type: string
+          description: The version of the EKS cluster
+          default: "1.26"
+          enum:
+            - "1.26"
+            - "1.27"
+            - "1.28"
+    - title: Node group details
+      required:
+        - nodeGroupSize
+        - nodeGroupInstanceType
+      properties:
+        nodeGroupSize:
+          title: Number of worker nodes
+          type: number
+          description: The number of worker nodes in the cluster
+          default: 3
+          minimum: 1
+          maximum: 10
+          ui:widget: range
+        nodeGroupInstanceType:
+          title: Node group instance type
+          type: string
+          description: The worker nodes authorized instances type
+          default: "m5.xlarge"
+          enum:
+            - "m5.xlarge"
+            - "m5.2xlarge"
+            - "m5.4xlarge"
+            - "m5.8xlarge"
+            - "m6i.xlarge"
+            - "m6i.2xlarge"
+            - "m6i.4xlarge"
+            - "m6i.8xlarge"
+          enumNames:
+            - "m5.xlarge (vCPU: 4, Memory: 16 GiB)"
+            - "m5.2xlarge (vCPU: 4, Memory: 16 GiB)"
+            - "m5.4xlarge (vCPU: 16, Memory: 64 GiB)"
+            - "m5.8xlarge (vCPU: 32, Memory: 128 GiB)"
+            - "m6i.xlarge (vCPU: 4, Memory: 16 GiB)"
+            - "m6i.2xlarge (vCPU: 8, Memory: 32 GiB)"
+            - "m6i.4xlarge (vCPU: 16, Memory: 64 GiB)"
+            - "m6i.8xlarge (vCPU: 32, Memory: 128 GiB)"
+    - title: Choose a location
+      required:
+        - repoUrl
+        - owner
+      properties:
+        repoUrl:
+          title: Repository Location
+          type: string
+          ui:field: RepoUrlPicker
+          ui:options:
+            allowedHosts:
+              - gitlab.corp.organization.com
+            allowedOwners:
+              - terraform/environments/organizationone
+              - organizationone-platform/reference_app
+            allowedRepos:
+              - w1-test1-use1-potter
+              - validation-repo
+        owner:
+          title: Choose the owner
+          type: string
+          description: Owner of the component
+          ui:field: OwnerPicker
+          ui:options:
+            catalogFilter:
+              kind:
+                - Group
+                - User
+
+  # These steps are executed in the scaffolder backend, using data that we gathered
+  # via the parameters above.
+  steps:
+    # Each step executes an action, in this case one templates files into the working directory.
+    - id: fetch-base
+      name: Fetch Base
+      action: fetch:template
+      input:
+        url: ./content
+        values:
+          accountName: ${{ parameters.account.split(',')[0] }}
+          accountNumber: ${{ parameters.account.split(',')[1] }}
+          accountRegion: ${{ parameters.account.split(',')[2] }}
+          clusterName: ${{ parameters.clusterName | trim }}
+          clusterVersion: ${{ parameters.clusterVersion }}
+          nodeGroupSize: ${{ parameters.nodeGroupSize }}
+          nodeGroupInstanceType: ${{ parameters.nodeGroupInstanceType }}
+
+    # This step publishes the contents of the working directory to GitHub.
+    - id: publish
+      name: Publish
+      action: publish:gitlab:merge-request
+      input:
+        repoUrl: ${{ parameters.repoUrl }}
+        title: Changes from backstage ${{ parameters.clusterName | trim }} cluster (${{ parameters.clusterVersion }})
+        description: This are chages pushed from backstage to the ${{ parameters.clusterName | trim }} cluster (${{ parameters.clusterVersion }})
+        branchName: feature/eks-${{ parameters.clusterName | trim }}
+        commitAction: ${{ parameters.action }}
+        removeSourceBranch: true
+
+    - id: register
+      name: Register
+      action: catalog:register
+      input:
+        repoContentsUrl: https://${{ parameters.repoUrl | parseRepoUrl | pick('host') }}/${{ parameters.repoUrl | parseRepoUrl | pick('owner') }}/${{ parameters.repoUrl | parseRepoUrl | pick('repo') }}
+        catalogInfoPath: "/-/blob/dev/eks-catalog-info.yaml"
+        optional: true
+
+  # Outputs are displayed to the user after a successful execution of the template.
+  output:
+    links:
+      - title: Merge Request
+        icon: web
+        url: ${{ steps['publish'].output.mergeRequestUrl }}
